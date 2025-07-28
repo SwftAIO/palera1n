@@ -224,15 +224,19 @@ jobs:
     needs: [build-docs, build-darwin, darwin-dist, build-Linux]
 
     steps:
+      # NEW – gh needs a local repo to attach assets to the right release
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Download every artifact
         uses: actions/download-artifact@v4
         with:
-          path: ./downloads          # e.g. downloads/darwin-dist/… downloads/linux-ready-arm64/…
+          path: ./downloads
 
-      - name: Show what we pulled   # optional but great for troubleshooting
+      - name: Show what we pulled   # optional, for debugging
         run: |
           echo "=== artifact tree ==="
-          find ./downloads -maxdepth 3 -type f | sort
+          find ./downloads -type f | head -n 50
 
       - name: Create or update release
         id: release
@@ -252,14 +256,13 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
 
-          # Find every palera1n-* or *.deb, excluding debug symbols & dev builds
+          # Collect binaries (.deb and palera1n-*, skip dev & debug)
           mapfile -t FILES < <(find ./downloads -type f \
-                                  \( -name 'palera1n-*' -o -name '*.deb' \) \
-                                  ! -name '*debug*' ! -name '*.development' \
-                                  -printf '%p\n' | sort)
+                                 \( -name 'palera1n-*' -o -name '*.deb' \) \
+                                 ! -name '*debug*' ! -name '*.development' \
+                                 -print | sort)
 
           echo "Uploading ${#FILES[@]} asset(s)…"
-
           for f in "${FILES[@]}"; do
             echo " • $(basename "$f")"
             gh release upload "$TAG" "$f" --clobber

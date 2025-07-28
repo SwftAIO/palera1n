@@ -224,12 +224,17 @@ jobs:
     needs: [build-docs, build-darwin, darwin-dist, build-Linux]
 
     steps:
-      - name: Download all artifacts
+      - name: Download every artifact
         uses: actions/download-artifact@v4
         with:
-          path: ./downloads   # creates downloads/<artifactName>/...
+          path: ./downloads          # e.g. downloads/darwin-dist/… downloads/linux-ready-arm64/…
 
-      - name: Create (or update) release
+      - name: Show what we pulled   # optional but great for troubleshooting
+        run: |
+          echo "=== artifact tree ==="
+          find ./downloads -maxdepth 3 -type f | sort
+
+      - name: Create or update release
         id: release
         uses: softprops/action-gh-release@v2
         with:
@@ -238,18 +243,24 @@ jobs:
           prerelease: true
           generate_release_notes: true
 
-      - name: Upload palera1n assets
+      - name: Upload palera1n & .deb assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: nightly-${{ github.run_number }}
+          TAG: nightly-${{ github.run_number }}
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           shopt -s nullglob
-          echo "Scanning ./downloads for release files…"
-          for f in $(find ./downloads -type f \
-                     \( -name 'palera1n-*' -o -name '*.deb' \) \
-                     ! -name '*debug*' ! -name '*.development' ); do
-            echo "Uploading $f"
-            gh release upload "$TAG_NAME" "$f" --clobber
+
+          # Find every palera1n-* or *.deb, excluding debug symbols & dev builds
+          mapfile -t FILES < <(find ./downloads -type f \
+                                  \( -name 'palera1n-*' -o -name '*.deb' \) \
+                                  ! -name '*debug*' ! -name '*.development' \
+                                  -printf '%p\n' | sort)
+
+          echo "Uploading ${#FILES[@]} asset(s)…"
+
+          for f in "${FILES[@]}"; do
+            echo " • $(basename "$f")"
+            gh release upload "$TAG" "$f" --clobber
           done

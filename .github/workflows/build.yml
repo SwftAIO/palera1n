@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
 
 ################################################################################
-#  1. BUILD AND PUBLISH MAN-PAGES (UBUNTU)                                      #
+#  1. BUILD AND PUBLISH MAN‑PAGES (UBUNTU)                                     #
 ################################################################################
 jobs:
   build-docs:
@@ -42,8 +42,8 @@ jobs:
           mkdir -p ready/docs
           cp docs/*.html docs/mandoc.css docs/palera1n.1 ready/docs
 
+      # keep PRs light – docs are optional for releases
       - name: Upload docs artifact
-        # keep PRs light – artifacts only for push / manual runs
         if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
@@ -52,7 +52,7 @@ jobs:
           retention-days: 14
 
 ################################################################################
-#  2. BUILD DARWIN TARGETS (macOS & iOS)                                        #
+#  2. BUILD DARWIN TARGETS (macOS & iOS)                                       #
 ################################################################################
   build-darwin:
     strategy:
@@ -98,11 +98,10 @@ jobs:
         run: |
           sudo xcode-select -s "/Applications/Xcode.app"
 
-      # …………………………………………………………………………………… unchanged build steps ……………………………………………………………………………………
+      # … build commands unchanged …
 
-      # Upload all thin-arch artifacts (these steps were already present)
+      # Upload all thin‑arch artifacts (no PR filter so forks get them)
       - name: Upload ${{ matrix.os }} thin ${{ matrix.arch }} build
-        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: palera1n-${{ matrix.os }}-${{ matrix.arch }}
@@ -110,7 +109,6 @@ jobs:
           retention-days: 14
 
       - name: Upload ${{ matrix.os }} thin ${{ matrix.arch }} build (Development)
-        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: palera1n-${{ matrix.os }}-${{ matrix.arch }}.development
@@ -118,7 +116,6 @@ jobs:
           retention-days: 14
 
       - name: Upload ${{ matrix.os }} thin ${{ matrix.arch }} debug symbols
-        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: palera1n-${{ matrix.os }}-${{ matrix.arch }}.dSYM
@@ -126,7 +123,7 @@ jobs:
           retention-days: 14
 
 ################################################################################
-#  3. FAT/UNIVERSAL MAC & DEB PACKAGES                                          #
+#  3. FAT / UNIVERSAL MAC & DEB PACKAGES                                       #
 ################################################################################
   darwin-dist:
     if: ${{ github.event_name != 'pull_request' }}
@@ -148,7 +145,7 @@ jobs:
       - name: Download all Darwin artifacts
         uses: actions/download-artifact@v4
 
-      # ……………………………………………………………………… packaging steps (unchanged) ………………………………………………………………………
+      # … packaging steps unchanged …
 
       - name: Upload packaged macOS/iOS artifacts
         uses: actions/upload-artifact@v4
@@ -158,7 +155,7 @@ jobs:
           retention-days: 14
 
 ################################################################################
-#  4. BUILD LINUX TARGETS                                                       #
+#  4. BUILD LINUX TARGETS                                                      #
 ################################################################################
   build-Linux:
     strategy:
@@ -208,23 +205,25 @@ jobs:
         run: |
           curl -LO "https://github.com/richfelker/musl-cross-make/releases/download/2025-02-01/${{ matrix.triple }}-cross.tgz"
 
-      # ……………………………………… rest of existing Linux build pipeline ………………………………………
+      # … build commands unchanged …
 
       - name: Upload Linux artifacts
-        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: linux-ready-${{ matrix.triple }}
           path: ready/
           retention-days: 14
 
+################################################################################
+#  5. CREATE / UPDATE NIGHTLY RELEASE                                          #
+################################################################################
   create-release:
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     needs: [build-docs, build-darwin, darwin-dist, build-Linux]
 
     steps:
-      # NEW – gh needs a local repo to attach assets to the right release
+      # gh needs a local repo to pick up default branch info
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -233,7 +232,7 @@ jobs:
         with:
           path: ./downloads
 
-      - name: Show what we pulled   # optional, for debugging
+      - name: Show pulled artifacts (debug)
         run: |
           echo "=== artifact tree ==="
           find ./downloads -type f | head -n 50

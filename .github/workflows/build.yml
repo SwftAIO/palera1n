@@ -114,6 +114,7 @@ jobs:
       - name: Build libimobiledevice
         run: |
           cd libimobiledevice
+          export PKG_CONFIG_PATH=$(pwd)/../sysroot/usr/local/lib/pkgconfig
           ./autogen.sh
           ./configure ${{ env.CONFIGURE_ARGS }} --with-mbedtls
           make -j$(sysctl -n hw.ncpu)

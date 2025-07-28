@@ -21,9 +21,6 @@ on:
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
-################################################################################
-#  1. BUILD AND PUBLISH MAN‑PAGES (UBUNTU)                                     #
-################################################################################
 jobs:
   build-docs:
     runs-on: ubuntu-latest
@@ -36,24 +33,18 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install mandoc make
 
-      - name: Build documentation
+      - name: Build Documentation
         run: |
-          make -j"$(nproc)" docs
+          make -j$(nproc) docs
           mkdir -p ready/docs
           cp docs/*.html docs/mandoc.css docs/palera1n.1 ready/docs
 
-      # keep PRs light – docs are optional for releases
       - name: Upload docs artifact
-        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
-          name: docs-html
+          name: docs
           path: ready/docs
-          retention-days: 14
 
-################################################################################
-#  2. BUILD DARWIN TARGETS (macOS & iOS)                                       #
-################################################################################
   build-darwin:
     strategy:
       matrix:
@@ -71,198 +62,87 @@ jobs:
             os: iphoneos
             minos: 7.0
     runs-on: macos-15
-    env:
-      MBEDTLS_VERSION: 3.5.2
-      READLINE_VERSION: 8.2
-      LIBIMOBILEDEVICE_COMMIT: ed0d66d0341562731bb19928dfe48155509fa7a7
-      LIBIRECOVERY_COMMIT: 7ce02c347b7c26e59498e6af31c9da51018d0fa1
-      LIBIMOBILEDEVICE_GLUE_COMMIT: 362f7848ac89b74d9dd113b38b51ecb601f76094
-      LIBPLIST_COMMIT: 2117b8fdb6b4096455bd2041a63e59a028120136
-      LIBUSBMUXD_COMMIT: a7f0543fb1ecb20ac7121c0fd77297200e0e43fc
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install dependencies (packages)
+      - name: Install dependencies
         run: |
           sudo /usr/local/bin/pip3 install jsonschema jinja2
           brew install make autoconf automake pkg-config gnu-sed gettext libtool
           sudo rm -rf /usr/local/Frameworks/Python*
-          curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_macosx_x86_64
-          sudo install -m755 ldid_macosx_x86_64 /usr/local/bin/ldid
 
-      - name: Select Xcode that ships with the runner
+      - name: Setup SDK
+        run: echo "SDK=$(xcrun -sdk ${{ matrix.os }} --show-sdk-path)" >> $GITHUB_ENV
+
+      - name: Select correct Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app
+
+      - name: Setup Environment
+        run: echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
+
+      - name: Build palera1n
         run: |
-          sudo xcode-select -s "/Applications/Xcode.app"
+          mkdir -p ready/builds
+          make -j$(sysctl -n hw.ncpu)
+          cp src/palera1n ready/builds/palera1n-${{ matrix.os }}-${{ matrix.arch }}
 
-      # … build commands unchanged …
-
-      # Upload all thin‑arch artifacts (no PR filter so forks get them)
-      - name: Upload ${{ matrix.os }} thin ${{ matrix.arch }} build
+      - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: palera1n-${{ matrix.os }}-${{ matrix.arch }}
-          path: palera1n-${{ matrix.os }}-${{ matrix.arch }}
-          retention-days: 14
+          path: ready/builds/palera1n-${{ matrix.os }}-${{ matrix.arch }}
 
-      - name: Upload ${{ matrix.os }} thin ${{ matrix.arch }} build (Development)
-        uses: actions/upload-artifact@v4
-        with:
-          name: palera1n-${{ matrix.os }}-${{ matrix.arch }}.development
-          path: palera1n-${{ matrix.os }}-${{ matrix.arch }}.development
-          retention-days: 14
-
-      - name: Upload ${{ matrix.os }} thin ${{ matrix.arch }} debug symbols
-        uses: actions/upload-artifact@v4
-        with:
-          name: palera1n-${{ matrix.os }}-${{ matrix.arch }}.dSYM
-          path: palera1n-${{ matrix.os }}-${{ matrix.arch }}.dSYM
-          retention-days: 14
-
-################################################################################
-#  3. FAT / UNIVERSAL MAC & DEB PACKAGES                                       #
-################################################################################
-  darwin-dist:
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: macos-latest
-    needs: build-darwin
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Procursus
-        uses: beerpiss/procursus-action@v2.0.2
-        with:
-          packages: sed coreutils
-          cache: true
-          mirror: 'https://apt.procurs.us/'
-
-      - name: Download all Darwin artifacts
-        uses: actions/download-artifact@v4
-
-      # … packaging steps unchanged …
-
-      - name: Upload packaged macOS/iOS artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: darwin-dist
-          path: ready/
-          retention-days: 14
-
-################################################################################
-#  4. BUILD LINUX TARGETS                                                      #
-################################################################################
-  build-Linux:
+  build-linux:
     strategy:
       matrix:
-        triple:
-          - i486-linux-musl
-          - x86_64-linux-musl
-          - armel-linux-musleabi
-          - aarch64-linux-musl
+        arch:
+          - amd64
+          - arm64
+          - armel
+          - i386
     runs-on: ubuntu-latest
-    env:
-      MBEDTLS_VERSION: 3.5.2
-      LIBUSB_VERSION: 1.0.27
-      READLINE_VERSION: 8.2
-      GPM_VERSION: 1.20.7
-      LIBIMOBILEDEVICE_COMMIT: ed0d66d0341562731bb19928dfe48155509fa7a7
-      LIBIRECOVERY_COMMIT: 7ce02c347b7c26e59498e6af31c9da51018d0fa1
-      LIBIMOBILEDEVICE_GLUE_COMMIT: 362f7848ac89b74d9dd113b38b51ecb601f76094
-      USBMUXD_COMMIT: bc0b91ca856811f4393318dc83db6dc3c1ac326d
-      LIBPLIST_COMMIT: 2117b8fdb6b4096455bd2041a63e59a028120136
-      LIBUSBMUXD_COMMIT: a7f0543fb1ecb20ac7121c0fd77297200e0e43fc
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Install build dependencies (packages)
+      - name: Install packages
         run: |
-          sudo apt-get remove -y libssl-dev libreadline-dev
-          sudo apt-get install -y pkg-config autoconf automake autopoint mandoc
-          sudo pip3 install jsonschema jinja2
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config autoconf automake
 
-      # --------------------------------------------------------------------
-      # PUBLIC toolchain download (no secrets needed)
-      # --------------------------------------------------------------------
-      - name: Download toolchain (cached)
-        id: toolchain_cache
-        uses: actions/cache@v3
-        with:
-          path: ${{ matrix.triple }}-cross.tgz
-          key: ${{ matrix.triple }}-toolchain
-
-      - name: Fetch musl-cross toolchain
-        if: steps.toolchain_cache.outputs.cache-hit != 'true'
+      - name: Build palera1n
         run: |
-          curl -LO "https://github.com/richfelker/musl-cross-make/releases/download/2025-02-01/${{ matrix.triple }}-cross.tgz"
+          mkdir -p ready/builds
+          make -j$(nproc)
+          cp src/palera1n ready/builds/palera1n-linux-${{ matrix.arch }}
 
-      # … build commands unchanged …
-
-      - name: Upload Linux artifacts
+      - name: Upload Linux Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-ready-${{ matrix.triple }}
-          path: ready/
-          retention-days: 14
+          name: palera1n-linux-${{ matrix.arch }}
+          path: ready/builds/palera1n-linux-${{ matrix.arch }}
 
-################################################################################
-#  5. CREATE / UPDATE NIGHTLY RELEASE                                          #
-################################################################################
-  create-release:
-    if: ${{ github.event_name != 'pull_request' }}
+  finish-build:
     runs-on: ubuntu-latest
-    needs: [build-docs, build-darwin, darwin-dist, build-Linux]
-
+    needs: [build-docs, build-darwin, build-linux]
     steps:
-      # gh needs a local repo to pick up default branch info
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download every artifact
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
-        with:
-          path: ./downloads
 
-      - name: Show pulled artifacts (debug)
+      - name: Create Release Bundle
         run: |
-          echo "=== artifact tree ==="
-          find ./downloads -type f | head -n 50
+          mkdir -p final_release
+          cp -r docs/* final_release/
+          cp -r palera1n-*/* final_release/
 
-      - name: Create or update release
-        id: release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Full Release Bundle
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: nightly-${{ github.run_number }}
-          name: Nightly ${{ github.run_number }}
-          prerelease: true
-          generate_release_notes: true
-
-      - name: Upload palera1n & .deb assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: nightly-${{ github.run_number }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-
-          # Collect binaries (.deb and palera1n-*, skip dev & debug)
-          mapfile -t FILES < <(find ./downloads -type f \
-                                 \( -name 'palera1n-*' -o -name '*.deb' \) \
-                                 ! -name '*debug*' ! -name '*.development' \
-                                 -print | sort)
-
-          echo "Uploading ${#FILES[@]} asset(s)…"
-          for f in "${FILES[@]}"; do
-            echo " • $(basename "$f")"
-            gh release upload "$TAG" "$f" --clobber
-          done
+          name: palera1n-full-release
+          path: final_release

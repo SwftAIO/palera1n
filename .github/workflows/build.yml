@@ -61,8 +61,6 @@ jobs:
             gnu_triple: aarch64-apple-darwin
             os: iphoneos
             minos: 7.0
-
-
     runs-on: macos-15
     env:
       MBEDTLS_VERSION: 3.5.2
@@ -72,98 +70,69 @@ jobs:
       LIBIMOBILEDEVICE_GLUE_COMMIT: 362f7848ac89b74d9dd113b38b51ecb601f76094
       LIBPLIST_COMMIT: 2117b8fdb6b4096455bd2041a63e59a028120136
       LIBUSBMUXD_COMMIT: a7f0543fb1ecb20ac7121c0fd77297200e0e43fc
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install dependencies
+      - name: Install dependencies (packages)
         run: |
           sudo /usr/local/bin/pip3 install jsonschema jinja2
           brew install make autoconf automake pkg-config gnu-sed gettext libtool
           sudo rm -rf /usr/local/Frameworks/Python*
+          curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_macosx_x86_64
+          sudo install -m755 ldid_macosx_x86_64 /usr/local/bin/ldid
 
-      - name: Setup SDK
-        run: echo "SDK=$(xcrun -sdk ${{ matrix.os }} --show-sdk-path)" >> $GITHUB_ENV
+      - name: Download dependencies (embedded binaries)
+        run: |
+          echo "SDK=$(xcrun -sdk ${{ matrix.os }} --show-sdk-path)" >> $GITHUB_ENV
 
       - name: Select correct Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.2.app
 
-      - name: Setup Environment
-        run: echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
+      - name: Setup environment
+        run: |
+          mkdir sysroot
+          echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
+          echo "PREFIX=/usr/local" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$(pwd)/sysroot/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+          echo "CONFIGURE_ARGS=--prefix=/usr/local --disable-shared --enable-static --build=x86_64-apple-darwin --host=${{ matrix.gnu_triple }}" >> $GITHUB_ENV
+          echo "CC=$(xcrun --find cc)" >> $GITHUB_ENV
+          echo "CXX=$(xcrun --find c++)" >> $GITHUB_ENV
+          echo "CPP=$(xcrun --find cc) -E" >> $GITHUB_ENV
+          echo "CFLAGS=-g -Os -isystem ${{ env.SDK }}/usr/include/c++/v1 -arch ${{ matrix.arch }} -m${{ matrix.os }}-version-min=${{ matrix.minos }} -isysroot ${{ env.SDK }} -isystem $(pwd)/sysroot/usr/local/include -Os -g -flto=full -Wl,-object_path_lto,lto.o -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
+          echo "CPPFLAGS=-g -Os -isystem ${{ env.SDK }}/usr/include/c++/v1 -arch ${{ matrix.arch }} -m${{ matrix.os }}-version-min=${{ matrix.minos }} -isysroot ${{ env.SDK }} -isystem $(pwd)/sysroot/usr/local/include -Wno-error-implicit-function-declaration -Os -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
+          echo "LDFLAGS=-g -Wl,-dead_strip -arch ${{ matrix.arch }} -isysroot ${{ env.SDK }} -m${{ matrix.os }}-version-min=${{ matrix.minos }} -L$(pwd)/sysroot/usr/local/lib" >> $GITHUB_ENV
 
       - name: Build palera1n
         run: |
-          mkdir -p ready/builds
           make -j$(sysctl -n hw.ncpu)
-          cp src/palera1n ready/builds/palera1n-${{ matrix.os }}-${{ matrix.arch }}
+          mkdir -p ready
+          cp src/palera1n ready/palera1n-${{ matrix.os }}-${{ matrix.arch }}
 
-      - name: Upload Build Artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: palera1n-${{ matrix.os }}-${{ matrix.arch }}
-          path: ready/builds/palera1n-${{ matrix.os }}-${{ matrix.arch }}
-
-  build-linux:
-    strategy:
-      matrix:
-        arch:
-          - amd64
-          - arm64
-          - armel
-          - i386
-    runs-on: ubuntu-latest
-    env:
-      MBEDTLS_VERSION: 3.5.2
-      LIBUSB_VERSION: 1.0.27
-      READLINE_VERSION: 8.2
-      GPM_VERSION: 1.20.7
-      LIBIMOBILEDEVICE_COMMIT: ed0d66d0341562731bb19928dfe48155509fa7a7
-      LIBIRECOVERY_COMMIT: 7ce02c347b7c26e59498e6af31c9da51018d0fa1
-      LIBIMOBILEDEVICE_GLUE_COMMIT: 362f7848ac89b74d9dd113b38b51ecb601f76094
-      USBMUXD_COMMIT: bc0b91ca856811f4393318dc83db6dc3c1ac326d
-      LIBPLIST_COMMIT: 2117b8fdb6b4096455bd2041a63e59a028120136
-      LIBUSBMUXD_COMMIT: a7f0543fb1ecb20ac7121c0fd77297200e0e43fc
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config autoconf automake
-
-      - name: Build palera1n
-        run: |
-          mkdir -p ready/builds
-          make -j$(nproc)
-          cp src/palera1n ready/builds/palera1n-linux-${{ matrix.arch }}
-
-      - name: Upload Linux Build Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: palera1n-linux-${{ matrix.arch }}
-          path: ready/builds/palera1n-linux-${{ matrix.arch }}
+          path: ready/palera1n-${{ matrix.os }}-${{ matrix.arch }}
 
   finish-build:
     runs-on: ubuntu-latest
-    needs: [build-docs, build-darwin, build-linux]
+    needs: [build-docs, build-darwin]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
-      - name: Create Release Bundle
+      - name: Bundle artifacts
         run: |
-          mkdir -p final_release
-          cp -r docs/* final_release/
-          cp -r palera1n-*/* final_release/
+          mkdir -p final_output
+          find . -name \"palera1n-*\" -exec cp {} final_output/ \\;
+          cp -r docs/* final_output/ || true
 
-      - name: Upload Full Release Bundle
+      - name: Upload final bundle
         uses: actions/upload-artifact@v4
         with:
-          name: palera1n-full-release
-          path: final_release
+          name: palera1n-complete-bundle
+          path: final_output
